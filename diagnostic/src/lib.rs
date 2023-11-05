@@ -43,7 +43,7 @@ impl Diagnostic for Void {}
 /// In the `ok` state, there is a value of type `T`, and a list of non-fatal diagnostics of type `N`.
 /// In the `err` state, there is a fatal error of type `E`, and a list of non-fatal diagnostics of type `N`.
 ///
-/// The fatal error type should either be a [`Diagnostic`], such as [`DynamicDiagnostic`].
+/// The fatal error type should be a [`Diagnostic`], such as [`DynamicDiagnostic`].
 ///
 /// The default non-fatal error type is [`Void`], which can never be diagnostics.
 /// This means that, by default, we do not track or allocate for non-fatal diagnostics.
@@ -357,6 +357,7 @@ impl Diagnostic for DynamicDiagnostic {
     }
 }
 
+#[cfg(feature = "fancy")]
 impl<T> Dr<T, DynamicDiagnostic, DynamicDiagnostic> {
     /// Prints all of the diagnostic messages contained in this diagnostic result.
     /// Then, return the contained value, if present.

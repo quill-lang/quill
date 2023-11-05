@@ -1,4 +1,6 @@
-use diagnostic::{miette, Dr};
+use db::Database;
+use diagnostic::miette;
+use files::{Db, Source};
 use thiserror::Error;
 
 #[derive(Error, miette::Diagnostic, Debug, Clone, PartialEq, Eq, Hash)]
@@ -20,9 +22,16 @@ fn main() {
         .expect("could not set default tracing subscriber");
     tracing::info!("initialised logging with verbosity level {}", log_level);
 
-    Dr::<(), _>::new_err(ParseError {
-        message: "world".to_owned(),
-    })
-    .to_dynamic()
-    .print_reports();
+    let db = Database::new(".");
+    let value = db
+        .read_source(Source {
+            directory: vec!["test".to_owned().into()],
+            name: "main".to_owned().into(),
+            extension: files::FileExtension::Quill,
+        })
+        .to_dynamic()
+        .print_reports();
+    if let Some(value) = value {
+        println!("{value}");
+    }
 }
