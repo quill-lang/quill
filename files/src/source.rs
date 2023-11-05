@@ -90,13 +90,6 @@ impl SourceData {
                 .unwrap_or("<could not read source file>".to_owned()),
         }
     }
-
-    pub fn new_empty(src: Source) -> Self {
-        SourceData {
-            src,
-            contents: "<could not read source file>".to_owned(),
-        }
-    }
 }
 
 impl miette::SourceCode for SourceData {

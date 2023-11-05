@@ -9,6 +9,7 @@ edition = "2021"
 db = { version = "0.0.0", path = "../db" }
 diagnostic = { version = "0.0.0", path = "../diagnostic", features = ["fancy"] }
 files = { version = "0.0.0", path = "../files" }
+parse = { version = "0.0.0", path = "../parse" }
 thiserror = "1.0.50"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.17"

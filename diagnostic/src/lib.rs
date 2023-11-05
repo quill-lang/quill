@@ -114,6 +114,12 @@ impl<T, E, N> Dr<T, E, N> {
         }
     }
 
+    /// Destructures this diagnostic result into its component parts.
+    /// It is the caller's responsibility to process the error messages in a sensible way.
+    pub fn destructure(self) -> (Result<T, E>, Vec<N>) {
+        (self.value, self.non_fatal)
+    }
+
     /// Applies the given operation to the contained value, if it exists.
     /// If this diagnostic result is in the `err` state, no action is performed.
     pub fn map<U>(self, op: impl FnOnce(T) -> U) -> Dr<U, E, N> {
@@ -165,6 +171,15 @@ impl<T, E, N> Dr<T, E, N> {
     pub fn with(mut self, diag: N) -> Self {
         if self.is_ok() {
             self.non_fatal.push(diag);
+        }
+        self
+    }
+
+    /// Produces a new diagnostic result by adding the given non-fatal diagnostics.
+    /// If this diagnostic result is in the `err` state, no action is performed.
+    pub fn with_many(mut self, diag: impl IntoIterator<Item = N>) -> Self {
+        if self.is_ok() {
+            self.non_fatal.extend(diag);
         }
         self
     }

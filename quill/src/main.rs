@@ -1,6 +1,6 @@
 use db::Database;
 use diagnostic::miette;
-use files::{Db, Source};
+use files::{Db, Source, SourceData};
 use thiserror::Error;
 
 #[derive(Error, miette::Diagnostic, Debug, Clone, PartialEq, Eq, Hash)]
@@ -23,15 +23,17 @@ fn main() {
     tracing::info!("initialised logging with verbosity level {}", log_level);
 
     let db = Database::new(".");
+    let src = Source {
+        directory: vec!["test".to_owned().into()],
+        name: "main".to_owned().into(),
+        extension: files::FileExtension::Quill,
+    };
     let value = db
-        .read_source(Source {
-            directory: vec!["test".to_owned().into()],
-            name: "main".to_owned().into(),
-            extension: files::FileExtension::Quill,
-        })
+        .read_source(src.clone())
         .to_dynamic()
+        .bind(|value| parse::lex::tokenise(&SourceData::new(src, &db), value.chars()))
         .print_reports();
     if let Some(value) = value {
-        println!("{value}");
+        println!("{value:#?}");
     }
 }
