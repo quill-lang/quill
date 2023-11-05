@@ -14,6 +14,15 @@ pub struct Span {
     pub end: usize,
 }
 
+impl Span {
+    pub fn union(self, other: Span) -> Span {
+        Self {
+            start: self.start.min(other.start),
+            end: self.end.min(other.end),
+        }
+    }
+}
+
 impl Debug for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}..{}", self.start, self.end)

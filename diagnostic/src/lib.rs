@@ -9,7 +9,7 @@ use std::{
     fmt::{Debug, Display},
 };
 
-use miette::{Diagnostic, Report};
+use miette::Diagnostic;
 
 /// An uninhabited type.
 /// It is not possible to construct `x: Void` in safe Rust.
@@ -378,13 +378,13 @@ impl<T> Dr<T, DynamicDiagnostic, DynamicDiagnostic> {
     /// Then, return the contained value, if present.
     pub fn print_reports(self) -> Option<T> {
         for diag in self.non_fatal {
-            println!("{:?}", Report::new(diag));
+            println!("{:?}", miette::Report::new(diag));
         }
 
         match self.value {
             Ok(value) => Some(value),
             Err(err) => {
-                println!("{:?}", Report::new(err));
+                println!("{:?}", miette::Report::new(err));
                 None
             }
         }

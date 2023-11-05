@@ -1,4 +1,7 @@
-use std::fmt::{Debug, Display};
+use std::{
+    fmt::{Debug, Display},
+    sync::Arc,
+};
 
 use diagnostic::miette;
 use internment::Intern;
@@ -68,7 +71,7 @@ impl Display for FileExtension {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SourceData {
     src: Source,
-    contents: String,
+    contents: Arc<String>,
 }
 
 impl SourceData {
@@ -86,8 +89,8 @@ impl SourceData {
             contents: db
                 .read_source(src)
                 .value()
-                .map(|value| (**value).clone())
-                .unwrap_or("<could not read source file>".to_owned()),
+                .map(|value| Arc::clone(value))
+                .unwrap_or(Arc::new("<could not read source file>".to_owned())),
         }
     }
 }
