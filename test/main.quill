@@ -1,2 +1,1 @@
-(foo (bar baz::qux) &&quux)
-// Why is the `&`-expression `&&quux` not parsed?
+fn foo -> ((&a) foo (bar baz::qux) (fn x y => z w))

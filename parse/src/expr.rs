@@ -99,6 +99,15 @@ pub enum PType {
     },
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct PBinder {
+    /// The argument of the function.
+    argument: Intern<String>,
+    argument_span: Span,
+    /// The argument type, if it is given explicitly.
+    argument_ty: Option<PType>,
+}
+
 /// A parsed term.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PTerm {
@@ -115,13 +124,13 @@ pub enum PTerm {
     },
     /// A lambda abstraction.
     Function {
+        /// The `fn` token.
+        fn_token: Span,
         /// The way this function is handled.
         kind: FunctionKind,
-        /// The argument of the function.
-        argument: Box<PTerm>,
-        /// The argument type, if it is given explicitly.
-        argument_ty: Box<PType>,
-        /// The return type of the function.
+        /// The arguments to the function.
+        binders: Vec<PBinder>,
+        /// The return value of the function.
         result: Box<PTerm>,
     },
     /// A function application.
@@ -192,8 +201,8 @@ impl Spanned for PTerm {
             PTerm::Equal { left, right } => left.span().union(right.span()),
             PTerm::Borrow { borrow, value } => borrow.union(value.span()),
             PTerm::Function {
-                argument, result, ..
-            } => argument.span().union(result.span()),
+                fn_token, result, ..
+            } => fn_token.union(result.span()),
             PTerm::Apply { left, right }
             | PTerm::InstantiatePolymorphic { left, right }
             | PTerm::InstantiatePolyregion { left, right } => left.span().union(right.span()),
@@ -243,7 +252,7 @@ impl Spanned for PrattExpression {
 
 impl PrattExpression {
     /// Turns a Pratt expression into a PTerm.
-    fn to_pterm(self, _parser: &Parser<'_, impl Iterator<Item = TokenTree>>) -> Self {
+    fn to_pterm(self) -> Self {
         match self {
             PrattExpression::QualifiedName {
                 segments,
@@ -299,6 +308,10 @@ where
         } else {
             todo!()
         }
+    }
+
+    fn parse_type(&mut self, indent: usize) -> Dr<PType, ParseError> {
+        todo!()
     }
 
     /// Parse all token trees that could be part of a Pratt expression.
@@ -366,7 +379,7 @@ where
         min_power: i32,
         expr_span: Span,
     ) -> PTerm {
-        let mut left = match terms.next().map(|value| value.to_pterm(self)) {
+        let mut left = match terms.next().map(|value| value.to_pterm()) {
             Some(PrattExpression::QualifiedName { .. }) => unreachable!(),
             Some(PrattExpression::Operator { text, info, span }) => {
                 // We have a prefix operator.
@@ -402,7 +415,7 @@ where
             match terms.peek() {
                 Some(PrattExpression::QualifiedName { .. }) => {
                     if let Some(PrattExpression::PTerm(right)) =
-                        terms.next().map(|value| value.to_pterm(self))
+                        terms.next().map(|value| value.to_pterm())
                     {
                         left = PTerm::Apply {
                             left: Box::new(left),
@@ -497,11 +510,15 @@ where
                 end: r.end,
             });
             match expr_span {
-                Some(expr_span) => Dr::new(self.parse_pratt_expr_binding_power(
-                    &mut terms.into_iter().peekable(),
-                    i32::MIN,
-                    expr_span,
-                )),
+                Some(expr_span) => {
+                    let mut iter = terms.into_iter().peekable();
+                    let result =
+                        self.parse_pratt_expr_binding_power(&mut iter, i32::MIN, expr_span);
+                    match iter.next() {
+                        Some(next) => Dr::new_err(todo!()),
+                        None => Dr::new(result),
+                    }
+                }
                 None => match self.peek() {
                     Some(_tt) => Dr::new_err(
                         todo!(),
@@ -536,131 +553,104 @@ where
         })
     }
 
-    /*
     /// Parses a single lambda abstraction binder.
-    fn parse_lambda_binder(&mut self, indent: usize, fn_token: Span) -> Dr<PLambdaBinder> {
+    fn parse_lambda_binder(&mut self, indent: usize, fn_token: Span) -> Dr<PBinder, ParseError> {
         match self.next() {
-            // A single lexical token is interpreted as a binder with no explicit type, using
-            // the explicit binder annotation.
-            Some(TokenTree::Lexical { text, span }) => Dr::ok(PLambdaBinder {
-                name: Name(WithProvenance::new(
-                    self.provenance(span),
-                    Str::new(self.config().db, text),
-                )),
-                annotation: BinderAnnotation::Explicit,
-                brackets: None,
-                ownership: None,
-                ty: None,
+            // A single lexical token is interpreted as a binder with no explicit type.
+            Some(TokenTree::Lexical { text, span }) => Dr::new(PBinder {
+                argument: text.into(),
+                argument_span: span,
+                argument_ty: None,
             }),
             Some(TokenTree::Block {
-                bracket,
+                bracket: Bracket::Paren,
                 open,
                 close,
                 contents,
             }) => {
-                // This is either a binder of the form `(ownership? name)`, using any bracket style, or
-                // `(ownership? name : type)`, again using any bracket style.
+                // This is a binder which explicitly declares its type.
+                // The form is `(name : type)`.
                 let mut inner = self.with_vec(open, close, contents);
-                // First, parse all of the ownership symbols.
-                let ownership = inner.parse_ownership();
-                if inner.one_tree_left() {
-                    // This is a binder which does not explicitly declare the type of the parameter.
-                    match inner.next() {
-                        Some(TokenTree::Lexical { text, span }) => Dr::ok(PLambdaBinder {
-                            name: Name(WithProvenance::new(
-                                inner.provenance(span),
-                                Str::new(inner.config().db, text),
-                            )),
-                            annotation: bracket.into(),
-                            brackets: Some((open, close)),
-                            ownership,
-                            ty: None,
-                        }),
-                        _ => todo!(),
-                    }
+                let (text, span) = if let Some(TokenTree::Lexical { text, span }) = inner.next() {
+                    (text, span)
                 } else {
-                    // This is a binder which explicitly declares its type.
-                    // The form is `name : type`.
-                    let name = if let Some(TokenTree::Lexical { text, span }) = inner.next() {
-                        Name(WithProvenance::new(
-                            inner.provenance(span),
-                            Str::new(inner.config().db, text),
-                        ))
-                    } else {
-                        todo!()
-                    };
-                    inner
-                        .require_reserved(ReservedSymbol::Colon)
-                        .bind(|_| inner.parse_term(indent, indent))
-                        .bind(|ty| {
-                            inner.assert_end("parameter type").map(|()| PLambdaBinder {
-                                name,
-                                annotation: bracket.into(),
-                                brackets: Some((open, close)),
-                                ownership,
-                                ty: Some(ty),
-                            })
+                    todo!()
+                };
+                inner
+                    .require_reserved(ReservedSymbol::Colon)
+                    .bind(|_| inner.parse_type(indent))
+                    .bind(|ty| {
+                        inner.assert_end("parameter type").map(|()| PBinder {
+                            argument: text.into(),
+                            argument_span: span,
+                            argument_ty: Some(ty),
                         })
-                }
+                    })
             }
-            Some(tt) => Dr::fail(
-                Report::new(ReportKind::Error, self.config().source, tt.span().start)
-                    .with_message(message!["expected a parameter name, but found ", &tt])
-                    .with_label(
-                        Label::new(self.config().source, tt.span(), LabelType::Error)
-                            .with_message("expected a parameter name".into()),
-                    )
-                    .with_label(
-                        Label::new(self.config().source, fn_token, LabelType::Note)
-                            .with_message("while parsing this function".into()),
-                    )
-                    .with_note(
-                        "use '=>' to end the sequence of parameters and begin the function body"
-                            .into(),
-                    ),
+            Some(tt) => Dr::new_err(
+                todo!(),
+                // Report::new(ReportKind::Error, self.config().source, tt.span().start)
+                //     .with_message(message!["expected a parameter name, but found ", &tt])
+                //     .with_label(
+                //         Label::new(self.config().source, tt.span(), LabelType::Error)
+                //             .with_message("expected a parameter name".into()),
+                //     )
+                //     .with_label(
+                //         Label::new(self.config().source, fn_token, LabelType::Note)
+                //             .with_message("while parsing this function".into()),
+                //     )
+                //     .with_note(
+                //         "use '=>' to end the sequence of parameters and begin the function body"
+                //             .into(),
+                //     ),
             ),
             None => todo!(),
         }
-    } */
+    }
 
     /// Assuming that the next token is a `fn`, parse a `fn <binders> => e` expression.
-    fn parse_fn_expr(&mut self, _min_indent: usize, _indent: usize) -> Dr<PTerm, ParseError> {
-        let _fn_token = self.next().unwrap().span();
+    fn parse_fn_expr(&mut self, min_indent: usize, indent: usize) -> Dr<PTerm, ParseError> {
+        let fn_token = self.next().unwrap().span();
 
-        todo!();
+        // Parse one or more binders.
+        let mut binders = Vec::new();
+        let kind = loop {
+            match self.peek() {
+                Some(TokenTree::Reserved {
+                    symbol: ReservedSymbol::Arrow,
+                    ..
+                }) => {
+                    self.next();
+                    break FunctionKind::Once;
+                }
+                Some(TokenTree::Reserved {
+                    symbol: ReservedSymbol::DoubleArrow,
+                    ..
+                }) => {
+                    self.next();
+                    break FunctionKind::Many;
+                }
+                _ => {
+                    let binder = self.parse_lambda_binder(indent, fn_token);
+                    let errored = binder.is_err();
+                    binders.push(binder);
+                    if errored {
+                        break FunctionKind::Once;
+                    }
+                }
+            }
+        };
 
-        // // Parse one or more binders.
-        // let mut binders = Vec::new();
-        // loop {
-        //     match self.peek() {
-        //         Some(TokenTree::Reserved {
-        //             symbol: ReservedSymbol::DoubleArrow,
-        //             ..
-        //         }) => {
-        //             self.next();
-        //             break;
-        //         }
-        //         _ => {
-        //             let binder = self.parse_lambda_binder(indent, fn_token);
-        //             let errored = binder.errored();
-        //             binders.push(binder);
-        //             if errored {
-        //                 break;
-        //             }
-        //         }
-        //     }
-        // }
-
-        // Dr::sequence(binders).bind(|binders| {
-        //     // TODO: Check that there is at least one binder?
-        //     self.parse_term(min_indent, indent)
-        //         .map(|result| PTerm::Function {
-        //             kind: todo!(),
-        //             argument: todo!(),
-        //             argument_ty: todo!(),
-        //             result: Box::new(result),
-        //         })
-        // })
+        Dr::sequence(binders).bind(|binders| {
+            // TODO: Check that there is at least one binder?
+            self.parse_term(min_indent, indent)
+                .map(|result| PTerm::Function {
+                    fn_token,
+                    kind,
+                    binders,
+                    result: Box::new(result),
+                })
+        })
     }
 
     /// An expression is:
