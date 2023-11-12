@@ -53,8 +53,8 @@ pub enum FunctionKind {
 /// A parsed type.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PType {
-    /// A type variable.
-    Variable { span: Span, name: Intern<String> },
+    /// A type variable, or possibly qualified name.
+    Variable { name: QualifiedName, span: Span },
     /// The type of propositions.
     Prop(Span),
     /// The type of borrowed values.
@@ -79,6 +79,8 @@ pub enum PType {
         /// The return type of the function.
         result: Box<PType>,
     },
+    /// An application of a polymorphic type.
+    Apply { left: Box<PType>, right: Box<PType> },
     /// The type of values that are parametrised by a type variable.
     Polymorphic {
         token: Span,
@@ -112,7 +114,7 @@ pub struct PBinder {
 #[derive(Debug, PartialEq, Eq)]
 pub enum PTerm {
     /// A local variable or a (possibly qualified) name.
-    Variable { span: Span, name: QualifiedName },
+    Variable { name: QualifiedName, span: Span },
     /// The proposition that two values of the same type are equal.
     Equal { left: Box<PTerm>, right: Box<PTerm> },
     /// A borrowed value.
@@ -187,6 +189,7 @@ impl Spanned for PType {
             PType::Function {
                 argument, result, ..
             } => argument.span().union(result.span()),
+            PType::Apply { left, right } => left.span().union(right.span()),
             PType::Polymorphic { token, result, .. } | PType::Polyregion { token, result, .. } => {
                 token.union(result.span())
             }
@@ -217,10 +220,8 @@ impl Spanned for PTerm {
 /// Easily parsable.
 enum PrattExpression {
     QualifiedName {
-        /// A list of name segments, their spans, and the spans of the following `::` token.
-        segments: Vec<(Intern<String>, Span, Span)>,
-        final_segment: Intern<String>,
-        final_span: Span,
+        name: QualifiedName,
+        span: Span,
     },
     Operator {
         text: Intern<String>,
@@ -233,43 +234,9 @@ enum PrattExpression {
 impl Spanned for PrattExpression {
     fn span(&self) -> Span {
         match self {
-            PrattExpression::QualifiedName {
-                segments,
-                final_span,
-                ..
-            } => match segments.first() {
-                Some((_, first_span, _)) => Span {
-                    start: first_span.start,
-                    end: final_span.end,
-                },
-                None => *final_span,
-            },
+            PrattExpression::QualifiedName { span, .. } => *span,
             PrattExpression::Operator { span, .. } => *span,
             PrattExpression::PTerm(term) => term.span(),
-        }
-    }
-}
-
-impl PrattExpression {
-    /// Turns a Pratt expression into a PTerm.
-    fn to_pterm(self) -> Self {
-        match self {
-            PrattExpression::QualifiedName {
-                segments,
-                final_segment,
-                final_span,
-            } => PrattExpression::PTerm(PTerm::Variable {
-                name: QualifiedName {
-                    module: segments.iter().map(|(segment, _, _)| *segment).collect(),
-                    name: final_segment,
-                },
-                span: segments
-                    .first()
-                    .map(|(_, span, _)| *span)
-                    .unwrap_or(final_span)
-                    .union(final_span),
-            }),
-            other => other,
         }
     }
 }
@@ -278,40 +245,141 @@ impl<'a, I> Parser<'a, I>
 where
     I: Iterator<Item = TokenTree>,
 {
-    fn parse_qualified_name(&mut self) -> Dr<PrattExpression, ParseError> {
-        if let Some(TokenTree::Lexical { text, span }) = self.next() {
-            if let Some(TokenTree::Reserved {
-                symbol: ReservedSymbol::Scope,
-                span: scope_span,
-            }) = self.peek()
-            {
-                let scope_span = *scope_span;
-                // Consume the `::` token.
-                self.next();
-                // Consume the tail qualified name.
-                self.parse_qualified_name().map(|mut tail| {
-                    if let PrattExpression::QualifiedName { segments, .. } = &mut tail {
-                        segments.insert(0, (text.into(), span, scope_span));
+    pub fn parse_kind(&mut self) -> Dr<PKind, ParseError> {
+        todo!()
+    }
+
+    fn parse_qualified_name(&mut self) -> Dr<(QualifiedName, Span), ParseError> {
+        struct PQualifiedName {
+            /// A list of name segments, their spans, and the spans of the following `::` token.
+            segments: Vec<(Intern<String>, Span, Span)>,
+            final_segment: Intern<String>,
+            final_span: Span,
+        }
+
+        fn inner<'a, I>(this: &mut Parser<'a, I>) -> Dr<PQualifiedName, ParseError>
+        where
+            I: Iterator<Item = TokenTree>,
+        {
+            if let Some(TokenTree::Lexical { text, span }) = this.next() {
+                if let Some(TokenTree::Reserved {
+                    symbol: ReservedSymbol::Scope,
+                    span: scope_span,
+                }) = this.peek()
+                {
+                    let scope_span = *scope_span;
+                    // Consume the `::` token.
+                    this.next();
+                    // Consume the tail qualified name.
+                    inner(this).map(|mut tail| {
+                        tail.segments.insert(0, (text.into(), span, scope_span));
                         tail
+                    })
+                } else {
+                    // This name has only one segment.
+                    Dr::new(PQualifiedName {
+                        segments: Vec::new(),
+                        final_segment: text.into(),
+                        final_span: span,
+                    })
+                }
+            } else {
+                todo!()
+            }
+        }
+
+        inner(self).map(|name: PQualifiedName| {
+            (
+                QualifiedName {
+                    module: name
+                        .segments
+                        .iter()
+                        .map(|(segment, _, _)| *segment)
+                        .collect(),
+                    name: name.final_segment,
+                },
+                name.segments
+                    .first()
+                    .map_or(name.final_span, |(_, span, _)| span.union(name.final_span)),
+            )
+        })
+    }
+
+    fn parse_type_application(&mut self, indent: usize) -> Dr<PType, ParseError> {
+        let mut terms = Vec::new();
+
+        loop {
+            tracing::debug!("{:?}", self.peek());
+            match self.peek() {
+                Some(TokenTree::Reserved {
+                    symbol: ReservedSymbol::Prop,
+                    span,
+                }) => {
+                    let span = *span;
+                    self.next();
+                    terms.push(Dr::new(PType::Prop(span)))
+                }
+                Some(TokenTree::Lexical { .. }) => terms.push(
+                    self.parse_qualified_name()
+                        .bind(|(name, span)| Dr::new(PType::Variable { name, span })),
+                ),
+                Some(TokenTree::Block { .. }) => {
+                    if let Some(TokenTree::Block {
+                        open,
+                        close,
+                        contents,
+                        ..
+                    }) = self.next()
+                    {
+                        let mut inner = self.with_vec(open, close, contents);
+                        terms.push(inner.parse_type(indent).bind(|term| {
+                            inner
+                                .assert_end("type inside bracketed block")
+                                .map(|()| term)
+                        }));
                     } else {
                         unreachable!()
                     }
-                })
-            } else {
-                // This name has only one segment.
-                Dr::new(PrattExpression::QualifiedName {
-                    segments: Vec::new(),
-                    final_segment: text.into(),
-                    final_span: span,
-                })
+                }
+                _ => break,
             }
-        } else {
-            todo!()
         }
+
+        Dr::sequence(terms).bind(|terms| {
+            match terms.into_iter().reduce(|left, right| PType::Apply {
+                left: Box::new(left),
+                right: Box::new(right),
+            }) {
+                Some(result) => Dr::new(result),
+                None => todo!(),
+            }
+        })
     }
 
-    fn parse_type(&mut self, indent: usize) -> Dr<PType, ParseError> {
-        todo!()
+    pub fn parse_type(&mut self, indent: usize) -> Dr<PType, ParseError> {
+        self.parse_type_application(indent)
+            .bind(|left| match self.peek() {
+                Some(TokenTree::Reserved {
+                    symbol: symbol @ (ReservedSymbol::Arrow | ReservedSymbol::DoubleArrow),
+                    span,
+                }) => {
+                    let kind = match symbol {
+                        ReservedSymbol::Arrow => FunctionKind::Once,
+                        ReservedSymbol::DoubleArrow => FunctionKind::Many,
+                        _ => unreachable!(),
+                    };
+                    let span = *span;
+                    self.next();
+                    self.parse_type(indent).map(|right| PType::Function {
+                        kind,
+                        argument: Box::new(left),
+                        region: None,
+                        arrow_token: span,
+                        result: Box::new(right),
+                    })
+                }
+                _ => Dr::new(left),
+            })
     }
 
     /// Parse all token trees that could be part of a Pratt expression.
@@ -323,7 +391,10 @@ where
         let mut result = Vec::new();
         loop {
             match self.peek() {
-                Some(TokenTree::Lexical { .. }) => result.push(self.parse_qualified_name()),
+                Some(TokenTree::Lexical { .. }) => result.push(
+                    self.parse_qualified_name()
+                        .map(|(name, span)| PrattExpression::QualifiedName { name, span }),
+                ),
                 Some(TokenTree::Operator { .. }) => {
                     if let Some(TokenTree::Operator { text, info, span }) = self.next() {
                         result.push(Dr::new(PrattExpression::Operator {
@@ -379,8 +450,8 @@ where
         min_power: i32,
         expr_span: Span,
     ) -> PTerm {
-        let mut left = match terms.next().map(|value| value.to_pterm()) {
-            Some(PrattExpression::QualifiedName { .. }) => unreachable!(),
+        let mut left = match terms.next() {
+            Some(PrattExpression::QualifiedName { name, span }) => PTerm::Variable { name, span },
             Some(PrattExpression::Operator { text, info, span }) => {
                 // We have a prefix operator.
                 match info.prefix {
@@ -394,8 +465,8 @@ where
                             },
                             _ => PTerm::Apply {
                                 left: Box::new(PTerm::Variable {
-                                    span,
                                     name: prefix_function,
+                                    span,
                                 }),
                                 right: Box::new(right),
                             },
@@ -414,12 +485,10 @@ where
         loop {
             match terms.peek() {
                 Some(PrattExpression::QualifiedName { .. }) => {
-                    if let Some(PrattExpression::PTerm(right)) =
-                        terms.next().map(|value| value.to_pterm())
-                    {
+                    if let Some(PrattExpression::QualifiedName { name, span }) = terms.next() {
                         left = PTerm::Apply {
                             left: Box::new(left),
-                            right: Box::new(right),
+                            right: Box::new(PTerm::Variable { name, span }),
                         }
                     } else {
                         unreachable!()
@@ -453,8 +522,8 @@ where
                         {
                             left = PTerm::Apply {
                                 left: Box::new(PTerm::Variable {
-                                    span,
                                     name: postfix_function,
+                                    span,
                                 }),
                                 right: Box::new(left),
                             };
@@ -479,8 +548,8 @@ where
                             left = PTerm::Apply {
                                 left: Box::new(PTerm::Apply {
                                     left: Box::new(PTerm::Variable {
-                                        span,
                                         name: infix_function,
+                                        span,
                                     }),
                                     right: Box::new(left),
                                 }),
@@ -503,7 +572,7 @@ where
     }
 
     /// Parses a Pratt expression.
-    pub fn parse_pratt_expr(&mut self, indent: usize) -> Dr<PTerm, ParseError> {
+    fn parse_pratt_expr(&mut self, indent: usize) -> Dr<PTerm, ParseError> {
         self.parse_pratt_expr_terms(indent).bind(|terms| {
             let expr_span = terms.iter().map(|expr| expr.span()).reduce(|l, r| Span {
                 start: l.start,
@@ -554,7 +623,7 @@ where
     }
 
     /// Parses a single lambda abstraction binder.
-    fn parse_lambda_binder(&mut self, indent: usize, fn_token: Span) -> Dr<PBinder, ParseError> {
+    fn parse_lambda_binder(&mut self, indent: usize) -> Dr<PBinder, ParseError> {
         match self.next() {
             // A single lexical token is interpreted as a binder with no explicit type.
             Some(TokenTree::Lexical { text, span }) => Dr::new(PBinder {
@@ -631,7 +700,7 @@ where
                     break FunctionKind::Many;
                 }
                 _ => {
-                    let binder = self.parse_lambda_binder(indent, fn_token);
+                    let binder = self.parse_lambda_binder(indent);
                     let errored = binder.is_err();
                     binders.push(binder);
                     if errored {

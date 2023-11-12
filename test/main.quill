@@ -1,1 +1,1 @@
-fn foo -> ((&a) foo (bar baz::qux) (fn x y => z w))
+fn (foo: (baz -> bar) -> w) -> ((&a) foo (bar baz::qux) (fn x y => z w))
