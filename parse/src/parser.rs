@@ -137,6 +137,7 @@ impl<'a> ParserConfiguration<'a> {
             let symbol = match text {
                 "def" => ReservedSymbol::Def,
                 "fn" => ReservedSymbol::Fn,
+                "forall" => ReservedSymbol::Forall,
                 "let" => ReservedSymbol::Let,
                 "Type" => ReservedSymbol::Type,
                 "Prop" => ReservedSymbol::Prop,

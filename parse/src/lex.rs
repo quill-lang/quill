@@ -90,6 +90,8 @@ pub enum ReservedSymbol {
     Def,
     /// `fn`
     Fn,
+    /// `forall`
+    Forall,
     /// `let`
     Let,
     /// `Type`
@@ -112,6 +114,7 @@ impl Display for ReservedSymbol {
             ReservedSymbol::Pipe => write!(f, "|"),
             ReservedSymbol::Def => write!(f, "def"),
             ReservedSymbol::Fn => write!(f, "fn"),
+            ReservedSymbol::Forall => write!(f, "forall"),
             ReservedSymbol::Let => write!(f, "let"),
             ReservedSymbol::Type => write!(f, "Type"),
             ReservedSymbol::Prop => write!(f, "Prop"),

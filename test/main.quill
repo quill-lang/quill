@@ -1,1 +1,1 @@
-fn (foo: (baz -> bar) -> w) -> ((&a) foo (bar baz::qux) (fn x y => z w))
+forall (T: Type), fn (x: forall S, T) -> x
