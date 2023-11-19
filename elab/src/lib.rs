@@ -1,17 +1,20 @@
 use std::collections::BTreeMap;
 
+use diagnostic::{miette, Dr};
+use files::{SourceData, Span};
 use internment::Intern;
 use parse::{
+    kind::PKind,
     lex::QualifiedName,
-    term::PTerm,
-    ty::{FunctionKind, PType},
+    ty::{FunctionKind, PRegion, PType},
 };
+use thiserror::Error;
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Metavariable(u32);
 
 /// A kind.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
     /// The kind of types.
     Type,
@@ -23,7 +26,7 @@ pub enum Kind {
 }
 
 /// A region.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Region {
     /// A region variable.
     Variable { name: Intern<String> },
@@ -37,7 +40,7 @@ pub enum Region {
 }
 
 /// A type.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     /// A type variable.
     Variable { name: Intern<String> },
@@ -69,7 +72,7 @@ pub enum Type {
     Polymorphic {
         /// The type variable.
         variable: Intern<String>,
-        variable_kind: Option<Kind>,
+        variable_kind: Kind,
         /// The type of the value, which may be polymorphic over the type variable.
         result: Box<Type>,
     },
@@ -85,7 +88,7 @@ pub enum Type {
 }
 
 /// A parsed term.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
     /// A local variable.
     Variable { name: Intern<String> },
@@ -133,15 +136,149 @@ pub enum Term {
 }
 
 /// An inference context describes the types currently assigned to each type variable.
-pub struct InferContext {}
+pub struct InferContext {
+    pub src: SourceData,
+}
+
+/// The set of type variables currently in scope.
+#[derive(Default, Debug, Clone)]
+pub struct Variables {
+    type_variables: BTreeMap<Intern<String>, (Span, Kind)>,
+}
+
+impl Variables {
+    pub fn format_type_variables(&self) -> Option<String> {
+        if self.type_variables.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "the type variables in scope are: {}",
+                self.type_variables
+                    .keys()
+                    .map(|key| key.as_ref().to_owned())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ))
+        }
+    }
+}
 
 impl InferContext {
-    pub fn elaborate_type(
+    pub fn elaborate_kind(&mut self, kind: &PKind) -> Kind {
+        match kind {
+            PKind::Type(_) => Kind::Type,
+            PKind::Constructor { argument, result } => Kind::Constructor {
+                argument: Box::new(self.elaborate_kind(argument)),
+                result: Box::new(self.elaborate_kind(result)),
+            },
+        }
+    }
+
+    pub fn elaborate_region(
         &mut self,
-        variables: &BTreeMap<Intern<String>, Type>,
-        ty: PType,
-    ) -> Type {
-        tracing::debug!("elaborating {ty}");
+        variables: &Variables,
+        region: &PRegion,
+    ) -> Dr<Region, ElabError> {
         todo!()
     }
+
+    pub fn elaborate_type(&mut self, variables: &Variables, ty: &PType) -> Dr<Type, ElabError> {
+        tracing::debug!("elaborating {ty}");
+        match ty {
+            PType::Variable { name, span } => {
+                if name.module.is_empty() {
+                    // Check if this is a type variable in scope.
+                    if let Some((_, _)) = variables.type_variables.get(&name.name) {
+                        return Dr::new(Type::Variable { name: name.name });
+                    }
+                }
+
+                Dr::new_err(ElabError::ExpectedName {
+                    src: self.src.clone(),
+                    variable: name.name,
+                    span: *span,
+                    known: variables.format_type_variables(),
+                })
+            }
+            PType::Prop(_) => todo!(),
+            PType::Borrow { borrow, region, ty } => todo!(),
+            PType::Function {
+                kind,
+                argument,
+                region,
+                result,
+                ..
+            } => self.elaborate_type(variables, argument).bind(|argument| {
+                self.elaborate_type(variables, result).bind(|result| {
+                    region
+                        .as_ref()
+                        .map_or_else(
+                            || Dr::new(None),
+                            |region| self.elaborate_region(variables, region).map(Some),
+                        )
+                        .map(|region| Type::Function {
+                            kind: *kind,
+                            argument: Box::new(argument),
+                            region,
+                            result: Box::new(result),
+                        })
+                })
+            }),
+            PType::Apply { left, right } => todo!(),
+            PType::Polymorphic {
+                binders, result, ..
+            } => {
+                let mut variables = variables.clone();
+                let typed_binders = binders
+                    .iter()
+                    .map(|binder| {
+                        (
+                            binder,
+                            binder
+                                .variable_kind
+                                .as_ref()
+                                .map_or(Kind::Type, |kind| self.elaborate_kind(kind)),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                for (binder, kind) in &typed_binders {
+                    variables
+                        .type_variables
+                        .insert(binder.variable, (binder.variable_span, kind.clone()));
+                }
+
+                self.elaborate_type(&variables, result).map(|result| {
+                    typed_binders
+                        .into_iter()
+                        .rev()
+                        .fold(result, |result, (binder, kind)| Type::Polymorphic {
+                            variable: binder.variable,
+                            variable_kind: kind,
+                            result: Box::new(result),
+                        })
+                })
+            }
+            PType::Polyregion {
+                token,
+                variable,
+                variable_span,
+                result,
+            } => todo!(),
+        }
+    }
+}
+
+#[derive(Error, miette::Diagnostic, Debug, Clone, PartialEq, Eq)]
+pub enum ElabError {
+    #[error("unknown type variable {variable}")]
+    ExpectedName {
+        #[source_code]
+        src: SourceData,
+        variable: Intern<String>,
+        #[label("unknown type variable found here")]
+        span: Span,
+        #[help("type variables in scope are: {}")]
+        known: Option<String>,
+    },
 }

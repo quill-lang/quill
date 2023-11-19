@@ -36,9 +36,9 @@ pub enum FunctionKind {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct PTypeBinder {
-    variable: Intern<String>,
-    variable_span: Span,
-    variable_kind: Option<PKind>,
+    pub variable: Intern<String>,
+    pub variable_span: Span,
+    pub variable_kind: Option<PKind>,
 }
 
 /// A parsed type.

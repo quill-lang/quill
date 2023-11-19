@@ -47,10 +47,16 @@ fn main() {
     if let Some(value) = value {
         for def in value {
             if let Some(ty) = def.ty {
-                tracing::info!(
-                    "{:#?}",
-                    elab::InferContext {}.elaborate_type(&Default::default(), ty)
-                );
+                let value = elab::InferContext {
+                    src: SourceData::new(src.clone(), &db),
+                }
+                .elaborate_type(&Default::default(), &ty)
+                .to_dynamic()
+                .print_reports();
+
+                if let Some(value) = value {
+                    tracing::info!("{value:?}");
+                }
             }
         }
     }

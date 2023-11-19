@@ -7,6 +7,8 @@ edition = "2021"
 
 [dependencies]
 diagnostic = { version = "0.0.0", path = "../diagnostic" }
+files = { version = "0.0.0", path = "../files" }
 internment = "0.7.4"
 parse = { version = "0.0.0", path = "../parse" }
+thiserror = "1.0.50"
 tracing = "0.1.40"
