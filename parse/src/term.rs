@@ -3,7 +3,7 @@
 //! and use a Pratt parser for the "Pratt expressions", a specific kind of sub-expression
 //! that deals only with prefix, infix, and postfix operators, as well as function application.
 
-use std::iter::Peekable;
+use std::{fmt::Display, iter::Peekable};
 
 use diagnostic::Dr;
 use files::{Span, Spanned};
@@ -11,16 +11,17 @@ use internment::Intern;
 
 use crate::{
     lex::{Bracket, OperatorInfo, QualifiedName, ReservedSymbol, TokenTree},
-    parser::{ParseError, Parser}, ty::{FunctionKind, PType, PTypeBinder},
+    parser::{ParseError, Parser},
+    ty::{FunctionKind, PType, PTypeBinder},
 };
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct PBinder {
     /// The argument of the function.
-    argument: Intern<String>,
-    argument_span: Span,
+    pub argument: Intern<String>,
+    pub argument_span: Span,
     /// The argument type, if it is given explicitly.
-    argument_ty: Option<PType>,
+    pub argument_ty: Option<PType>,
 }
 
 /// A parsed term.
@@ -524,6 +525,54 @@ where
                 self.parse_term(min_indent, newline_indent)
             }
             _ => self.parse_pratt_term(indent),
+        }
+    }
+}
+
+impl Display for PTerm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PTerm::Variable { name, .. } => write!(f, "{name}"),
+            PTerm::Equal { left, right } => write!(f, "{left} === {right}"),
+            PTerm::Borrow { value, .. } => write!(f, "& ({value})"),
+            PTerm::Function {
+                kind,
+                binders,
+                result,
+                ..
+            } => {
+                write!(f, "fn")?;
+                for binder in binders {
+                    match &binder.argument_ty {
+                        Some(ty) => write!(f, " ({}: {})", binder.argument, ty)?,
+                        None => write!(f, " {}", binder.argument)?,
+                    }
+                }
+                match kind {
+                    FunctionKind::Once => write!(f, " -> ")?,
+                    FunctionKind::Many => write!(f, " => ")?,
+                }
+                write!(f, "{result}")
+            }
+            PTerm::Apply { left, right } => write!(f, "({left}) ({right})"),
+            PTerm::Polymorphic { binders, value, .. } => {
+                write!(f, "forall")?;
+                for binder in binders {
+                    match &binder.variable_kind {
+                        Some(kind) => write!(f, " ({}: {})", binder.variable, kind)?,
+                        None => write!(f, " {}", binder.variable)?,
+                    }
+                }
+                write!(f, ", {value}")
+            }
+            PTerm::InstantiatePolymorphic { left, right } => todo!(),
+            PTerm::Polyregion {
+                token,
+                variable,
+                variable_span,
+                value,
+            } => todo!(),
+            PTerm::InstantiatePolyregion { left, right } => todo!(),
         }
     }
 }

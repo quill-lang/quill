@@ -383,9 +383,7 @@ impl Display for PType {
             ),
             PType::Apply { left, right } => write!(f, "({left}) ({right})"),
             PType::Polymorphic {
-                token,
-                binders,
-                result,
+                binders, result, ..
             } => {
                 write!(f, "forall")?;
                 for binder in binders {

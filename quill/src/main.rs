@@ -48,16 +48,22 @@ fn main() {
         for def in value {
             if let Some(ty) = def.ty {
                 let mut elaborator = elab::Elaborator::new(SourceData::new(src.clone(), &db));
-                let value = elaborator
+                let mut ty = elaborator
                     .elaborate_type(&Default::default(), &ty)
-                    .map(|mut ty| {
-                        elaborator.instantiate_metavariables(&mut ty);
-                        ty
-                    })
+                    .to_dynamic()
+                    .print_reports()
+                    .unwrap_or_else(|| elaborator.new_metavariable());
+
+                let value = elaborator
+                    .elaborate_term(&Default::default(), &def.body, &ty)
                     .to_dynamic()
                     .print_reports();
 
-                if let Some(value) = value {
+                elaborator.instantiate_type(&mut ty);
+                tracing::info!("{ty}");
+
+                if let Some(mut value) = value {
+                    elaborator.instantiate_term(&mut value);
                     tracing::info!("{value}");
                 }
             }

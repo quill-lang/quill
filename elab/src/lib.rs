@@ -6,6 +6,7 @@ use internment::Intern;
 use parse::{
     kind::PKind,
     lex::QualifiedName,
+    term::{PBinder, PTerm},
     ty::{FunctionKind, PRegion, PType, PTypeBinder},
 };
 use thiserror::Error;
@@ -268,6 +269,88 @@ impl Display for Type {
     }
 }
 
+impl Term {
+    pub fn to_pterm(&self) -> PTerm {
+        match self {
+            Term::Variable { name } => PTerm::Variable {
+                name: QualifiedName {
+                    module: Vec::new(),
+                    name: *name,
+                },
+                span: Span::default(),
+            },
+            Term::QualifiedName { name } => PTerm::Variable {
+                name: name.clone(),
+                span: Span::default(),
+            },
+            Term::Equal { left, right } => PTerm::Equal {
+                left: Box::new(left.to_pterm()),
+                right: Box::new(right.to_pterm()),
+            },
+            Term::Borrow { value } => PTerm::Borrow {
+                borrow: Span::default(),
+                value: Box::new(value.to_pterm()),
+            },
+            Term::Function {
+                kind,
+                argument,
+                argument_ty,
+                result,
+            } => PTerm::Function {
+                fn_token: Span::default(),
+                kind: *kind,
+                binders: vec![PBinder {
+                    argument: *argument,
+                    argument_span: Span::default(),
+                    argument_ty: argument_ty
+                        .as_ref()
+                        .map(|argument_ty| argument_ty.to_ptype()),
+                }],
+                result: Box::new(result.to_pterm()),
+            },
+            Term::Apply { left, right } => PTerm::Apply {
+                left: Box::new(left.to_pterm()),
+                right: Box::new(right.to_pterm()),
+            },
+            Term::Polymorphic {
+                variable,
+                variable_kind,
+                value,
+            } => PTerm::Polymorphic {
+                token: Span::default(),
+                binders: vec![PTypeBinder {
+                    variable: *variable,
+                    variable_span: Span::default(),
+                    variable_kind: variable_kind
+                        .as_ref()
+                        .map(|variable_kind| variable_kind.to_pkind()),
+                }],
+                value: Box::new(value.to_pterm()),
+            },
+            Term::InstantiatePolymorphic { left, right } => PTerm::InstantiatePolymorphic {
+                left: Box::new(left.to_pterm()),
+                right: Box::new(right.to_pterm()),
+            },
+            Term::Polyregion { variable, value } => PTerm::Polyregion {
+                token: Span::default(),
+                variable: *variable,
+                variable_span: Span::default(),
+                value: Box::new(value.to_pterm()),
+            },
+            Term::InstantiatePolyregion { left, right } => PTerm::InstantiatePolyregion {
+                left: Box::new(left.to_pterm()),
+                right: Box::new(right.to_pterm()),
+            },
+        }
+    }
+}
+
+impl Display for Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_pterm())
+    }
+}
+
 pub struct Elaborator {
     pub src: SourceData,
     next_metakind: Metakind,
@@ -314,7 +397,7 @@ impl Elaborator {
         }
     }
 
-    pub fn instantiate_metakinds(&self, kind: &mut Kind) {
+    pub fn instantiate_kind(&self, kind: &mut Kind) {
         match kind {
             Kind::Type => {}
             Kind::Constructor { argument, result } => todo!(),
@@ -323,15 +406,15 @@ impl Elaborator {
                     *kind = replacement.clone();
                     // This recursive call should never loop
                     // because of the occurs check performed when we add a metavariable assignment.
-                    self.instantiate_metakinds(kind)
+                    self.instantiate_kind(kind)
                 }
             }
         }
     }
 
-    pub fn instantiate_metavariables(&self, ty: &mut Type) {
+    pub fn instantiate_type(&self, ty: &mut Type) {
         match ty {
-            Type::Variable { .. } | Type::QualifiedName { .. } | Type::Prop => {},
+            Type::Variable { .. } | Type::QualifiedName { .. } | Type::Prop => {}
             Type::Borrow { region, ty } => todo!(),
             Type::Function {
                 kind,
@@ -339,17 +422,17 @@ impl Elaborator {
                 region,
                 result,
             } => {
-                self.instantiate_metavariables(argument);
-                self.instantiate_metavariables(result);
-            },
+                self.instantiate_type(argument);
+                self.instantiate_type(result);
+            }
             Type::Apply { left, right } => todo!(),
             Type::Polymorphic {
                 variable_kind,
                 result,
                 ..
             } => {
-                self.instantiate_metakinds(variable_kind);
-                self.instantiate_metavariables(result);
+                self.instantiate_kind(variable_kind);
+                self.instantiate_type(result);
             }
             Type::Polyregion { variable, result } => todo!(),
             Type::Metavariable { index } => {
@@ -357,16 +440,40 @@ impl Elaborator {
                     *ty = replacement.clone();
                     // This recursive call should never loop
                     // because of the occurs check performed when we add a metavariable assignment.
-                    self.instantiate_metavariables(ty)
+                    self.instantiate_type(ty)
                 }
             }
         }
     }
 
+    pub fn instantiate_term(&self, term: &mut Term) {
+        match term {
+            Term::Variable { name } => todo!(),
+            Term::QualifiedName { name } => todo!(),
+            Term::Equal { left, right } => todo!(),
+            Term::Borrow { value } => todo!(),
+            Term::Function {
+                kind,
+                argument,
+                argument_ty,
+                result,
+            } => todo!(),
+            Term::Apply { left, right } => todo!(),
+            Term::Polymorphic {
+                variable,
+                variable_kind,
+                value,
+            } => todo!(),
+            Term::InstantiatePolymorphic { left, right } => todo!(),
+            Term::Polyregion { variable, value } => todo!(),
+            Term::InstantiatePolyregion { left, right } => todo!(),
+        }
+    }
+
     /// The left kind is the found kind, and the right kind is the expected kind.
     pub fn unify_kinds(&mut self, mut left: Kind, mut right: Kind) -> Dr<(), ElabError> {
-        self.instantiate_metakinds(&mut left);
-        self.instantiate_metakinds(&mut right);
+        self.instantiate_kind(&mut left);
+        self.instantiate_kind(&mut right);
 
         match (left, right) {
             (Kind::Type, Kind::Type) => Dr::new(()),
@@ -552,6 +659,18 @@ impl Elaborator {
                 result,
             } => todo!(),
         }
+    }
+
+    /// If an expected type is not known, pass a new metavariable.
+    pub fn elaborate_term(
+        &mut self,
+        context: &Context,
+        term: &PTerm,
+        expected_type: &Type,
+    ) -> Dr<Term, ElabError> {
+        tracing::debug!("elaborating {term}");
+        tracing::debug!("expected type is {expected_type}");
+        todo!()
     }
 }
 
