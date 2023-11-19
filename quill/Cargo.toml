@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 db = { version = "0.0.0", path = "../db" }
 diagnostic = { version = "0.0.0", path = "../diagnostic", features = ["fancy"] }
+elab = { version = "0.0.0", path = "../elab" }
 files = { version = "0.0.0", path = "../files" }
 parse = { version = "0.0.0", path = "../parse" }
 thiserror = "1.0.50"

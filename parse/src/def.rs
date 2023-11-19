@@ -2,9 +2,10 @@ use diagnostic::{Dr, Void};
 use files::Span;
 
 use crate::{
-    expr::{PTerm, PType},
     lex::{QualifiedName, ReservedSymbol, TokenTree},
     parser::{ParseError, Parser},
+    term::PTerm,
+    ty::PType,
 };
 
 /// A parsed lambda binder.
@@ -93,14 +94,15 @@ where
                 }
             }
 
-            let _ = self.require_newline();
+            if let (Err(err), _) = self.require_newline().destructure() {
+                errors.push(err);
+            }
         }
 
         if let (Err(err), _) = self.assert_end("definitions").destructure() {
             errors.push(err);
         }
 
-        Dr::new(result)
-            .with_many(errors)
+        Dr::new(result).with_many(errors)
     }
 }

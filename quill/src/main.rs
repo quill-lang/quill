@@ -45,6 +45,13 @@ fn main() {
         .print_reports();
 
     if let Some(value) = value {
-        println!("{value:#?}");
+        for def in value {
+            if let Some(ty) = def.ty {
+                tracing::info!(
+                    "{:#?}",
+                    elab::InferContext {}.elaborate_type(&Default::default(), ty)
+                );
+            }
+        }
     }
 }
