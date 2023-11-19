@@ -47,15 +47,18 @@ fn main() {
     if let Some(value) = value {
         for def in value {
             if let Some(ty) = def.ty {
-                let value = elab::InferContext {
-                    src: SourceData::new(src.clone(), &db),
-                }
-                .elaborate_type(&Default::default(), &ty)
-                .to_dynamic()
-                .print_reports();
+                let mut elaborator = elab::Elaborator::new(SourceData::new(src.clone(), &db));
+                let value = elaborator
+                    .elaborate_type(&Default::default(), &ty)
+                    .map(|mut ty| {
+                        elaborator.instantiate_metavariables(&mut ty);
+                        ty
+                    })
+                    .to_dynamic()
+                    .print_reports();
 
                 if let Some(value) = value {
-                    tracing::info!("{value:?}");
+                    tracing::info!("{value}");
                 }
             }
         }

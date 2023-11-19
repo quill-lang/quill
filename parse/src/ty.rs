@@ -340,15 +340,6 @@ where
     }
 }
 
-impl Display for PKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PKind::Type(_) => write!(f, "Type"),
-            PKind::Constructor { argument, result } => write!(f, "({argument}) -> ({result})"),
-        }
-    }
-}
-
 impl Display for PRegion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

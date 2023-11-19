@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use diagnostic::Dr;
 use files::{Span, Spanned};
 
@@ -16,6 +18,9 @@ pub enum PKind {
         argument: Box<PKind>,
         result: Box<PKind>,
     },
+    /// A kind metavariable.
+    /// These can't be written in code, but are useful for pretty printing.
+    Metakind { span: Span, name: String },
 }
 
 impl Spanned for PKind {
@@ -23,6 +28,7 @@ impl Spanned for PKind {
         match self {
             PKind::Type(span) => *span,
             PKind::Constructor { argument, result } => argument.span().union(result.span()),
+            PKind::Metakind { span, .. } => *span,
         }
     }
 }
@@ -78,5 +84,15 @@ where
                 Dr::new(left)
             }
         })
+    }
+}
+
+impl Display for PKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PKind::Type(_) => write!(f, "Type"),
+            PKind::Constructor { argument, result } => write!(f, "({argument}) -> ({result})"),
+            PKind::Metakind { name, .. } => write!(f, "{name}"),
+        }
     }
 }
