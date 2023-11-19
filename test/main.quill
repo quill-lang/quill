@@ -1,1 +1,8 @@
-forall (T: Type), fn (x: forall S, T) -> x
+i: forall (A: Type), A -> A =
+    forall A, fn a -> a
+
+k: forall (A: Type) (B: Type), A -> B -> A =
+    forall A B, fn a b -> a
+
+s: forall (A: Type) (B: Type) (C: Type), (C -> B -> A) -> (C -> B) -> C -> A =
+    forall A B C, fn x y z -> x z (y z)

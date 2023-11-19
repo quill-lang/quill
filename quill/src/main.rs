@@ -39,7 +39,7 @@ fn main() {
                 &ParserConfiguration::new(&SourceData::new(src.clone(), &db)),
                 tokens.into_iter(),
             )
-            .parse_term(0, 0)
+            .parse_defs()
             .to_dynamic()
         })
         .print_reports();

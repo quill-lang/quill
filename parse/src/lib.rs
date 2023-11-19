@@ -3,3 +3,4 @@ mod expr;
 pub mod lex;
 pub mod parser;
 mod provenance;
+mod def;

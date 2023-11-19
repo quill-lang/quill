@@ -299,7 +299,7 @@ where
         })
     }
 
-    fn parse_qualified_name(&mut self) -> Dr<(QualifiedName, Span), ParseError> {
+    pub(crate) fn parse_qualified_name(&mut self) -> Dr<(QualifiedName, Span), ParseError> {
         struct PQualifiedName {
             /// A list of name segments, their spans, and the spans of the following `::` token.
             segments: Vec<(Intern<String>, Span, Span)>,
@@ -359,7 +359,6 @@ where
         let mut terms = Vec::new();
 
         loop {
-            tracing::debug!("{:?}", self.peek());
             match self.peek() {
                 Some(TokenTree::Reserved {
                     symbol: ReservedSymbol::Prop,
